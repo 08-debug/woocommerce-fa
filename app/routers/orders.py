@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query
 
 from app.config import get_settings
 from app.schemas.order import Order, OrderStatus
@@ -31,3 +31,16 @@ def get_orders(
 def get_placed_orders() -> list[Order]:
     with WooCommerceClient(get_settings()) as client:
         return list_placed_orders(client)
+
+
+@router.get(
+    "/paginated",
+    response_model=list[Order],
+    summary="Retrieve orders with pagination",
+)
+def get_orders_paginated(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    per_page: int = Query(default=10, ge=1, le=100, description="Orders per page (default 10)"),
+) -> list[Order]:
+    with WooCommerceClient(get_settings()) as client:
+        return list_orders(client, page=page, per_page=per_page)

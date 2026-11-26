@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import ValidationError
@@ -27,6 +27,19 @@ router = APIRouter(prefix="/products", tags=["products"])
 def get_products() -> list[Product]:
     with WooCommerceClient(get_settings()) as client:
         return list_published_products(client)
+
+
+@router.get(
+    "/paginated",
+    response_model=list[Product],
+    summary="Retrieve published products with pagination",
+)
+def get_products_paginated(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    per_page: int = Query(default=10, ge=1, le=100, description="Products per page (default 10)"),
+) -> list[Product]:
+    with WooCommerceClient(get_settings()) as client:
+        return list_published_products(client, page=page, per_page=per_page)
 
 
 @router.get(
