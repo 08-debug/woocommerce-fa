@@ -1,4 +1,4 @@
-﻿import httpx
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,6 +40,7 @@ def sample_woo_product(product_id: int = 101, **overrides: object) -> dict[str, 
     }
     item.update(overrides)
     return item
+
 
 
 def test_get_products_returns_published_products_in_schema_format(
@@ -260,3 +261,182 @@ def test_post_product_rejects_invalid_upstream_response(monkeypatch: pytest.Monk
 
     assert response.status_code == 502
     assert response.json()["detail"] == "The WooCommerce API returned an unexpected response format."
+
+
+def test_search_products_by_name_filters_and_validates(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/wp-json/wc/v3/products"
+        assert request.url.params["status"] == "publish"
+        assert request.url.params["search"] == "Mouse"
+        return httpx.Response(
+            200,
+            json=[
+                sample_woo_product(301, name="Wireless Mouse", sku="WM-01"),
+                sample_woo_product(302, name="USB Keyboard", sku="UK-01"),
+            ],
+        )
+
+    mock_httpx(monkeypatch, handler)
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params={"name": "  Mouse  "})
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": 301,
+            "name": "Wireless Mouse",
+            "sku": "WM-01",
+            "regular_price": "29.99",
+            "sale_price": "24.99",
+            "stock_quantity": 12,
+            "stock_status": "instock",
+        }
+    ]
+
+
+def test_search_products_by_partial_sku(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["status"] == "publish"
+        assert "sku" not in request.url.params
+        return httpx.Response(
+            200,
+            json=[
+                sample_woo_product(301, name="Wireless Mouse", sku="WM-01"),
+                sample_woo_product(302, name="Wired Mouse", sku="wm-02"),
+                sample_woo_product(303, name="USB Keyboard", sku="UK-01"),
+            ],
+        )
+
+    mock_httpx(monkeypatch, handler)
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params={"sku": "WM"})
+
+    assert response.status_code == 200
+    assert [item["sku"] for item in response.json()] == ["WM-01", "wm-02"]
+
+
+def test_search_products_by_name_and_sku(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["search"] == "Mouse"
+        return httpx.Response(
+            200,
+            json=[
+                sample_woo_product(301, name="Wireless Mouse", sku="WM-01"),
+                sample_woo_product(302, name="Gaming Mouse", sku="GM-01"),
+            ],
+        )
+
+    mock_httpx(monkeypatch, handler)
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params={"name": "Mouse", "sku": "WM"})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["id"] == 301
+
+
+def test_search_products_empty_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_httpx(monkeypatch, lambda request: httpx.Response(200, json=[]))
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params={"sku": "NO-SUCH-SKU"})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {},
+        {"name": "   "},
+        {"sku": ""},
+        {"name": " ", "sku": "  "},
+    ],
+)
+def test_search_products_requires_name_or_sku(
+    monkeypatch: pytest.MonkeyPatch,
+    query: dict[str, str],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("WooCommerce should not be called without search parameters")
+
+    mock_httpx(monkeypatch, handler)
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params=query)
+
+    assert response.status_code == 422
+
+
+def test_get_products_filters_by_partial_sku_and_price_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json=[
+                sample_woo_product(401, name="Wireless Mouse", sku="WM-100", regular_price="35.00", sale_price="25.00"),
+                sample_woo_product(402, name="Pro Mouse", sku="WM-200", regular_price="50.00", sale_price=""),
+                sample_woo_product(403, name="Budget Mouse", sku="WM-300", regular_price="", sale_price=""),
+                sample_woo_product(404, name="Keyboard", sku="KB-100", regular_price="25.00", sale_price=""),
+            ],
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/products/search",
+            params={"sku": "wm", "min_price": "20", "max_price": "30"},
+        )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [401]
+
+
+def test_search_products_by_price_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json=[
+                sample_woo_product(501, regular_price="19.99", sale_price=""),
+                sample_woo_product(502, regular_price="49.99", sale_price="29.99"),
+                sample_woo_product(503, regular_price="10.00", sale_price=""),
+            ],
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params={"min_price": "15", "max_price": "30"})
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [501, 502]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"min_price": "50", "max_price": "10"},
+        {"min_price": "-1"},
+        {"max_price": "-5"},
+    ],
+)
+def test_get_products_rejects_invalid_price_range(
+    monkeypatch: pytest.MonkeyPatch,
+    params: dict[str, str],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("WooCommerce should not be called on invalid price range")
+
+    mock_httpx(monkeypatch, handler)
+
+    with TestClient(app) as client:
+        response = client.get("/products/search", params=params)
+
+    assert response.status_code == 422

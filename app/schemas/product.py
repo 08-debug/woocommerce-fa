@@ -1,7 +1,7 @@
-﻿from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _validate_price_string(value: str | None) -> str | None:
@@ -64,3 +64,49 @@ class ProductCreate(BaseModel):
     @classmethod
     def validate_prices(cls, value: str | None) -> str | None:
         return _validate_price_string(value)
+
+
+class ProductFilterParams(BaseModel):
+    """Optional filters for retrieving WooCommerce products."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, description="Partial product name filter")
+    sku: str | None = Field(default=None, description="Partial SKU filter")
+    min_price: Decimal | None = Field(default=None, ge=0, description="Minimum price")
+    max_price: Decimal | None = Field(default=None, ge=0, description="Maximum price")
+
+    @field_validator("name", "sku", mode="before")
+    @classmethod
+    def normalize_query(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_price_range(self) -> "ProductFilterParams":
+        if (
+            self.min_price is not None
+            and self.max_price is not None
+            and self.min_price > self.max_price
+        ):
+            raise ValueError("'min_price' cannot be greater than 'max_price'.")
+        return self
+
+
+class ProductSearchParams(ProductFilterParams):
+    """Validated query parameters for searching WooCommerce products."""
+
+    @model_validator(mode="after")
+    def require_at_least_one_filter(self) -> "ProductSearchParams":
+        if (
+            self.name is None
+            and self.sku is None
+            and self.min_price is None
+            and self.max_price is None
+        ):
+            raise ValueError(
+                "Provide at least one search parameter: 'name', 'sku', 'min_price', or 'max_price'."
+            )
+        return self
