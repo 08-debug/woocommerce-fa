@@ -1,12 +1,31 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers import orders, products
-from app.services.woocommerce import ConnectionStatus, WooCommerceClient
+from app.services.woocommerce import (
+    ConnectionStatus,
+    WooCommerceAPIError,
+    WooCommerceClient,
+)
 
 app = FastAPI(title="WooCommerce Store Integration")
 app.include_router(products.router)
 app.include_router(orders.router)
+
+
+@app.exception_handler(WooCommerceAPIError)
+def woocommerce_api_error_handler(
+    request: Request,
+    exc: WooCommerceAPIError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.message,
+            "upstream_status": exc.upstream_status,
+        },
+    )
 
 
 @app.get("/")

@@ -14,7 +14,7 @@ from app.services.product_service import (
     list_published_products,
     search_products,
 )
-from app.services.woocommerce import WooCommerceAPIError, WooCommerceClient
+from app.services.woocommerce import WooCommerceClient
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -25,11 +25,8 @@ router = APIRouter(prefix="/products", tags=["products"])
     summary="Retrieve all published products",
 )
 def get_products() -> list[Product]:
-    try:
-        with WooCommerceClient(get_settings()) as client:
-            return list_published_products(client)
-    except WooCommerceAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    with WooCommerceClient(get_settings()) as client:
+        return list_published_products(client)
 
 
 @router.get(
@@ -56,11 +53,8 @@ def get_products_search(
             detail=exc.errors()[0]["msg"],
         ) from exc
 
-    try:
-        with WooCommerceClient(get_settings()) as client:
-            return search_products(client, search_params)
-    except WooCommerceAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    with WooCommerceClient(get_settings()) as client:
+        return search_products(client, search_params)
 
 
 @router.post(
@@ -70,8 +64,5 @@ def get_products_search(
     summary="Create a product",
 )
 def post_product(payload: ProductCreate) -> Product:
-    try:
-        with WooCommerceClient(get_settings()) as client:
-            return create_product(client, payload)
-    except WooCommerceAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    with WooCommerceClient(get_settings()) as client:
+        return create_product(client, payload)

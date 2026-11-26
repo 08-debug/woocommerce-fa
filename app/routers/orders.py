@@ -1,9 +1,9 @@
-﻿from fastapi import APIRouter, HTTPException, Query
+﻿from fastapi import APIRouter, Query
 
 from app.config import get_settings
 from app.schemas.order import Order, OrderStatus
 from app.services.order_service import list_orders, list_placed_orders
-from app.services.woocommerce import WooCommerceAPIError, WooCommerceClient
+from app.services.woocommerce import WooCommerceClient
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -19,11 +19,8 @@ def get_orders(
         description="Filter by order status (pending, processing, on-hold, completed, cancelled, refunded, failed, draft)",
     ),
 ) -> list[Order]:
-    try:
-        with WooCommerceClient(get_settings()) as client:
-            return list_orders(client, order_status=status)
-    except WooCommerceAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    with WooCommerceClient(get_settings()) as client:
+        return list_orders(client, order_status=status)
 
 
 @router.get(
@@ -32,8 +29,5 @@ def get_orders(
     summary="Retrieve all placed orders",
 )
 def get_placed_orders() -> list[Order]:
-    try:
-        with WooCommerceClient(get_settings()) as client:
-            return list_placed_orders(client)
-    except WooCommerceAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    with WooCommerceClient(get_settings()) as client:
+        return list_placed_orders(client)
