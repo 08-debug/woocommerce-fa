@@ -33,11 +33,15 @@ class WooCommerceAPIError(Exception):
         message: str,
         status_code: int = 502,
         upstream_status: int | None = None,
+        upstream_code: str | None = None,
+        upstream_message: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.upstream_status = upstream_status
+        self.upstream_code = upstream_code
+        self.upstream_message = upstream_message
 
 
 class _WooCommerceAuth(httpx.Auth):
@@ -136,6 +140,8 @@ class WooCommerceClient:
         *,
         params: dict[str, object] | None = None,
         json_body: dict[str, object] | None = None,
+        data: dict[str, object] | None = None,
+        files: dict[str, object] | None = None,
     ) -> tuple[object, int]:
         """Send an authenticated request to a WooCommerce endpoint and return parsed JSON and status."""
         store_url, version = self._validated_config()
@@ -146,6 +152,8 @@ class WooCommerceClient:
                 url,
                 params=params,
                 json=json_body,
+                data=data,
+                files=files,
             )
         except httpx.TimeoutException as exc:
             raise WooCommerceAPIError(
@@ -170,6 +178,54 @@ class WooCommerceClient:
             ) from exc
 
         return payload, response.status_code
+
+    def fetch_paginated(
+        self,
+        endpoint: str,
+        *,
+        params: dict[str, object] | None = None,
+        page: int | None = None,
+        per_page: int = 100,
+    ) -> tuple[list[object], int]:
+        """Retrieve a single page or all pages in batches of `per_page`."""
+        base_params = dict(params or {})
+        if page is not None:
+            payload, status_code = self.request_json(
+                "GET",
+                endpoint,
+                params={**base_params, "per_page": per_page, "page": page},
+            )
+            if not isinstance(payload, list):
+                raise WooCommerceAPIError(
+                    "The WooCommerce API returned an unexpected response format.",
+                    status_code=502,
+                    upstream_status=status_code,
+                )
+            return payload, status_code
+
+        items: list[object] = []
+        current_page = 1
+        last_status = 200
+
+        while True:
+            payload, last_status = self.request_json(
+                "GET",
+                endpoint,
+                params={**base_params, "per_page": per_page, "page": current_page},
+            )
+            if not isinstance(payload, list):
+                raise WooCommerceAPIError(
+                    "The WooCommerce API returned an unexpected response format.",
+                    status_code=502,
+                    upstream_status=last_status,
+                )
+
+            items.extend(payload)
+            if len(payload) < per_page:
+                break
+            current_page += 1
+
+        return items, last_status
 
     def verify_connection(self) -> ConnectionStatus:
         store_url = self.settings.woocommerce_store_url.strip()
@@ -250,17 +306,44 @@ def validate_store_url(store_url: str) -> str | None:
     return None
 
 
+def _extract_upstream_error_info(response: httpx.Response) -> tuple[str | None, str | None]:
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, ValueError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    code = payload.get("code")
+    message = payload.get("message")
+    return (
+        str(code) if isinstance(code, str) else None,
+        str(message) if isinstance(message, str) else None,
+    )
+
+
 def _raise_for_http_error(response: httpx.Response) -> None:
     status_code = response.status_code
+    if status_code in (400, 409, 413, 422):
+        upstream_code, upstream_message = _extract_upstream_error_info(response)
+        raise WooCommerceAPIError(
+            "The WooCommerce API rejected the request.",
+            status_code=status_code,
+            upstream_status=status_code,
+            upstream_code=upstream_code,
+            upstream_message=upstream_message,
+        )
     if status_code == 401:
         raise WooCommerceAPIError("Invalid API credentials.", status_code=401, upstream_status=status_code)
     if status_code == 403:
         raise WooCommerceAPIError("Insufficient API permissions.", status_code=403, upstream_status=status_code)
     if status_code == 404:
+        upstream_code, upstream_message = _extract_upstream_error_info(response)
         raise WooCommerceAPIError(
             "The WooCommerce API endpoint was not found.",
             status_code=404,
             upstream_status=status_code,
+            upstream_code=upstream_code,
+            upstream_message=upstream_message,
         )
     if status_code >= 500:
         raise WooCommerceAPIError(

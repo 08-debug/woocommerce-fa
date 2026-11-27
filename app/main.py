@@ -1,8 +1,13 @@
-from fastapi import FastAPI, Request
+﻿from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import orders, products
+from app.routers import (
+    orders,
+    product_attribute_terms,
+    product_attributes,
+    products,
+)
 from app.services.woocommerce import (
     ConnectionStatus,
     WooCommerceAPIError,
@@ -10,6 +15,8 @@ from app.services.woocommerce import (
 )
 
 app = FastAPI(title="WooCommerce Store Integration")
+app.include_router(product_attribute_terms.router)
+app.include_router(product_attributes.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 
