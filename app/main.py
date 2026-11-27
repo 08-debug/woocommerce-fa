@@ -6,6 +6,7 @@ from app.routers import (
     orders,
     product_attribute_terms,
     product_attributes,
+    product_variations,
     products,
 )
 from app.services.woocommerce import (
@@ -17,6 +18,7 @@ from app.services.woocommerce import (
 app = FastAPI(title="WooCommerce Store Integration")
 app.include_router(product_attribute_terms.router)
 app.include_router(product_attributes.router)
+app.include_router(product_variations.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 
